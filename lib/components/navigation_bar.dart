@@ -104,7 +104,7 @@ class NaviPaneState extends State<NaviPane>
       _kBottomBarHeight + MediaQuery.of(context).padding.bottom;
 
   void onNavigatorStateChange() {
-    onRebuild(context);
+    onRebuild(_availableWidth);
   }
 
   void updatePage(int index) {
@@ -142,8 +142,9 @@ class NaviPaneState extends State<NaviPane>
     super.dispose();
   }
 
-  double targetFormContext(BuildContext context) {
-    var width = MediaQuery.of(context).size.width;
+  double _availableWidth = 0;
+
+  double targetForWidth(double width) {
     double target = 0;
     if (width > changePoint) {
       target = 2;
@@ -156,8 +157,8 @@ class NaviPaneState extends State<NaviPane>
 
   double? animationTarget;
 
-  void onRebuild(BuildContext context) {
-    double target = targetFormContext(context);
+  void onRebuild(double width) {
+    double target = targetForWidth(width);
     if (controller.value != target || animationTarget != target) {
       if (controller.isAnimating) {
         if (animationTarget == target) {
@@ -173,52 +174,65 @@ class NaviPaneState extends State<NaviPane>
 
   @override
   Widget build(BuildContext context) {
-    onRebuild(context);
     final mq = MediaQuery.of(context);
-    final sideInsets = (App.isMobile && mq.orientation == Orientation.landscape)
-        ? EdgeInsets.only(
-            left: math.max(mq.viewPadding.left, mq.systemGestureInsets.left),
-            right: math.max(mq.viewPadding.right, mq.systemGestureInsets.right),
-          )
-        : EdgeInsets.zero;
-    return _NaviPopScope(
-      action: () {
-        if (App.mainNavigatorKey!.currentState!.canPop()) {
-          App.mainNavigatorKey!.currentState!.maybePop();
-        } else {
-          SystemNavigator.pop();
-        }
-      },
-      popGesture: App.isIOS && context.width >= changePoint,
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, child) {
-          final value = controller.value;
-          Widget content = Stack(
-            children: [
-              Positioned(
-                left: _kFoldedSideBarWidth * ((value - 2.0).clamp(-1.0, 0.0)),
-                top: 0,
-                bottom: 0,
-                child: buildLeft(),
+    // Side safe areas can be present in either orientation on a folding phone.
+    final sideInsets = EdgeInsets.only(
+      left: math.max(
+        mq.viewPadding.left,
+        App.isMobile ? mq.systemGestureInsets.left : 0,
+      ),
+      right: math.max(
+        mq.viewPadding.right,
+        App.isMobile ? mq.systemGestureInsets.right : 0,
+      ),
+    );
+    return Padding(
+      padding: sideInsets,
+      child: MediaQuery.removePadding(
+        context: context,
+        removeLeft: true,
+        removeRight: true,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            _availableWidth = constraints.maxWidth;
+            onRebuild(_availableWidth);
+            return _NaviPopScope(
+              action: () {
+                if (App.mainNavigatorKey!.currentState!.canPop()) {
+                  App.mainNavigatorKey!.currentState!.maybePop();
+                } else {
+                  SystemNavigator.pop();
+                }
+              },
+              popGesture: App.isIOS && _availableWidth > changePoint,
+              child: AnimatedBuilder(
+                animation: controller,
+                builder: (context, child) {
+                  final value = controller.value;
+                  return Stack(
+                    children: [
+                      Positioned(
+                        left:
+                            _kFoldedSideBarWidth *
+                            ((value - 2.0).clamp(-1.0, 0.0)),
+                        top: 0,
+                        bottom: 0,
+                        child: buildLeft(),
+                      ),
+                      Positioned.fill(
+                        left:
+                            _kFoldedSideBarWidth * ((value - 1).clamp(0, 1)) +
+                            (_kSideBarWidth - _kFoldedSideBarWidth) *
+                                ((value - 2).clamp(0, 1)),
+                        child: buildMainView(),
+                      ),
+                    ],
+                  );
+                },
               ),
-              Positioned.fill(
-                left:
-                    _kFoldedSideBarWidth * ((value - 1).clamp(0, 1)) +
-                    (_kSideBarWidth - _kFoldedSideBarWidth) *
-                        ((value - 2).clamp(0, 1)),
-                child: buildMainView(),
-              ),
-            ],
-          );
-          if (sideInsets != EdgeInsets.zero) {
-            content = Padding(
-              padding: sideInsets,
-              child: content,
             );
-          }
-          return content;
-        },
+          },
+        ),
       ),
     );
   }
@@ -340,33 +354,46 @@ class NaviPaneState extends State<NaviPane>
             ),
           ),
         ),
-        child: Column(
-          children: [
-            const SizedBox(height: 16),
-            SizedBox(height: MediaQuery.of(context).padding.top),
-            ...List<Widget>.generate(
-              widget.paneItems.length,
-              (index) => _SideNaviWidget(
-                enabled: currentPage == index,
-                entry: widget.paneItems[index],
-                showTitle: value == 3,
-                onTap: () {
-                  updatePage(index);
-                },
-                key: ValueKey(index),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 16),
+                      SizedBox(height: MediaQuery.of(context).padding.top),
+                      ...List<Widget>.generate(
+                        widget.paneItems.length,
+                        (index) => _SideNaviWidget(
+                          enabled: currentPage == index,
+                          entry: widget.paneItems[index],
+                          showTitle: value == 3,
+                          onTap: () {
+                            updatePage(index);
+                          },
+                          key: ValueKey(index),
+                        ),
+                      ),
+                      const Spacer(),
+                      ...List<Widget>.generate(
+                        widget.paneActions.length,
+                        (index) => _PaneActionWidget(
+                          entry: widget.paneActions[index],
+                          showTitle: value == 3,
+                          key: ValueKey(index + widget.paneItems.length),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 16 + MediaQuery.paddingOf(context).bottom,
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const Spacer(),
-            ...List<Widget>.generate(
-              widget.paneActions.length,
-              (index) => _PaneActionWidget(
-                entry: widget.paneActions[index],
-                showTitle: value == 3,
-                key: ValueKey(index + widget.paneItems.length),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -670,23 +697,32 @@ class _NaviMainViewState extends State<_NaviMainView> {
 
   @override
   Widget build(BuildContext context) {
-    var shouldShowAppBar = state.controller.value < 2;
-    return Column(
-      children: [
-        if (shouldShowAppBar) state.buildTop().paddingTop(context.padding.top),
-        Expanded(
-          child: MediaQuery.removePadding(
-            context: context,
-            removeTop: shouldShowAppBar,
-            child: AnimatedSwitcher(
-              duration: _fastAnimationDuration,
-              child: state.buildMainViewContent(),
+    return AnimatedBuilder(
+      animation: state.controller,
+      child: AnimatedSwitcher(
+        duration: _fastAnimationDuration,
+        child: state.buildMainViewContent(),
+      ),
+      builder: (context, child) {
+        final shouldShowAppBar = state.controller.value < 2;
+        return Column(
+          children: [
+            if (shouldShowAppBar)
+              state.buildTop().paddingTop(context.padding.top),
+            Expanded(
+              // Keep the content element when navigation moves to the side.
+              key: const ValueKey('navigation-content'),
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: shouldShowAppBar,
+                child: child!,
+              ),
             ),
-          ),
-        ),
-        if (shouldShowAppBar)
-          state.buildBottom().paddingBottom(context.padding.bottom),
-      ],
+            if (shouldShowAppBar)
+              state.buildBottom().paddingBottom(context.padding.bottom),
+          ],
+        );
+      },
     );
   }
 }

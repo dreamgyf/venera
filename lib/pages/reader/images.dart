@@ -30,7 +30,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
   /// Handle jumping to last page when _jumpToLastPageOnLoad is true
   void _handleJumpToLastPage() {
     if (reader._jumpToLastPageOnLoad) {
-      reader._page = reader.maxPage;
+      reader.page = reader.maxPage;
       reader._jumpToLastPageOnLoad = false;
     }
   }
@@ -134,7 +134,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
             true;
         return _GalleryMode(
           key: Key(
-            '${reader.mode.key}_${reader.imagesPerPage}_${showComments}_$showCommentsAtEnd',
+            '${reader.mode.key}_${reader.imagesPerPage}_${reader.showSingleImageOnFirstPage()}_${showComments}_$showCommentsAtEnd',
           ),
         );
       } else {
@@ -204,12 +204,28 @@ class _GalleryModeState extends State<_GalleryMode>
   @override
   void initState() {
     reader = context.reader;
-    controller = PageController(initialPage: reader.page);
+    // The image anchor owns restoration across layout changes. PageStorage's
+    // old spread index may refer to a different image after folding.
+    controller = PageController(initialPage: reader.page, keepPage: false);
     reader._imageViewController = this;
     Future.microtask(() {
+      if (!mounted) return;
       context.readerScaffold.setFloatingButton(0);
     });
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    keyRepeatTimer?.cancel();
+    controller.dispose();
+    for (final photoController in photoViewControllers.values) {
+      photoController.dispose();
+    }
+    if (identical(reader._imageViewController, this)) {
+      reader._imageViewController = null;
+    }
+    super.dispose();
   }
 
   /// Get the range of images for the given page. [page] is 1-based.
@@ -357,29 +373,7 @@ class _GalleryModeState extends State<_GalleryMode>
           }
         },
         pageController: controller,
-        loadingBuilder: (context, event) {
-          return PhotoView.customChild(
-            childSize: MediaQuery.of(context).size,
-            initialScale: PhotoViewComputedScale.contained,
-            minScale: PhotoViewComputedScale.contained * 1.0,
-            maxScale: PhotoViewComputedScale.covered * 10.0,
-            backgroundDecoration: BoxDecoration(
-              color: context.colorScheme.surface,
-            ),
-            child: Center(
-              child: SizedBox(
-                width: 20.0,
-                height: 20.0,
-                child: CircularProgressIndicator(
-                  backgroundColor: context.colorScheme.surfaceContainerHigh,
-                  value: event == null || event.expectedTotalBytes == null
-                      ? null
-                      : event.cumulativeBytesLoaded / event.expectedTotalBytes!,
-                ),
-              ),
-            ),
-          );
-        },
+        loadingBuilder: buildReaderImageLoading,
         onPageChanged: (i) {
           if (i == 0) {
             if (reader.isFirstChapterOfGroup || !reader.toPrevChapter(toLastPage: true)) {

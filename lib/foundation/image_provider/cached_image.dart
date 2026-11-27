@@ -47,6 +47,14 @@ class CachedImageProvider
         var file = File(url.substring(7));
         return file.readAsBytes();
       }
+      if (sourceKey == 'local' && cid != null) {
+        final localComic = LocalManager().find(cid!, ComicType.local);
+        if (localComic == null) {
+          throw 'Error: Local comic not found.';
+        }
+        checkStop();
+        return localComic.coverFile.readAsBytes();
+      }
       await for (var progress in ImageDownloader.loadThumbnail(url, sourceKey, cid)) {
         checkStop();
         chunkEvents.add(ImageChunkEvent(

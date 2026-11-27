@@ -27,6 +27,8 @@ A comic reader that support reading local and network comics.
 3. Install rust, see [rustup.rs](https://rustup.rs/)
 4. Build for your platform: e.g. `flutter build apk`
 
+For iPhone Duo builds and device validation, see [iPhone Duo](doc/iphone_duo.md).
+
 ## Create a new comic source
 See [Comic Source](doc/comic_source.md)
 

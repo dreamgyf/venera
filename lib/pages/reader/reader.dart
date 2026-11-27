@@ -32,6 +32,8 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/network/images.dart';
+import 'package:venera/pages/reader/image_loading.dart';
+import 'package:venera/pages/reader/page_position.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/clipboard_image.dart';
 import 'package:venera/utils/data_sync.dart';
@@ -112,7 +114,7 @@ class _ReaderState extends State<Reader>
     with _ReaderLocation, _ReaderWindow, _VolumeListener, _ImagePerPageHandler {
   @override
   void update() {
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   /// The maximum page number for images only (excluding chapter comments page).
@@ -134,11 +136,11 @@ class _ReaderState extends State<Reader>
   }
 
   /// Whether the current page is the chapter comments page.
-  @override
   bool get isOnChapterCommentsPage {
     return _shouldShowChapterCommentsAtEnd && _page > maxPage;
   }
 
+  @override
   bool get _shouldShowChapterCommentsAtEnd {
     if (mode != ReaderMode.galleryLeftToRight &&
         mode != ReaderMode.galleryRightToLeft) {
@@ -242,7 +244,7 @@ class _ReaderState extends State<Reader>
       initImagesPerPage(widget.initialPage ?? 1);
       _isInitialized = true;
     } else {
-      // For orientation changed
+      // Folding and resizing can change the reading layout without a rotation.
       _checkImagesPerPageChange();
     }
     initReaderWindow();
@@ -292,18 +294,12 @@ class _ReaderState extends State<Reader>
       focusNode: focusNode,
       autofocus: true,
       onKeyEvent: onKeyEvent,
-      child: Overlay(
-        initialEntries: [
-          OverlayEntry(
-            builder: (context) {
-              return _ReaderScaffold(
-                child: _ReaderGestureDetector(
-                  child: _ReaderImages(key: Key(chapter.toString())),
-                ),
-              );
-            },
+      child: Overlay.wrap(
+        child: _ReaderScaffold(
+          child: _ReaderGestureDetector(
+            child: _ReaderImages(key: Key(chapter.toString())),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -320,6 +316,9 @@ class _ReaderState extends State<Reader>
 
   @override
   void onPageChanged() {
+    if (_isInitialized) {
+      _recordPageChange();
+    }
     updateHistory();
   }
 
@@ -334,16 +333,10 @@ class _ReaderState extends State<Reader>
         /// Record the last image of chapter
         history!.page = images?.length ?? 1;
       } else {
-        /// Record the first image of the page
-        if (!showSingleImageOnFirstPage() || imagesPerPage == 1) {
-          history!.page = (page - 1) * imagesPerPage + 1;
-        } else {
-          if (page == 1) {
-            history!.page = 1;
-          } else {
-            history!.page = (page - 2) * imagesPerPage + 2;
-          }
-        }
+        // Resizing changes the spread, but must not move the saved image.
+        history!.page = _isInitialized
+            ? _position.image
+            : _pageLayout.firstImageOnPage(page);
       }
       history!.maxPage = images?.length ?? 1;
       if (widget.chapters?.isGrouped ?? false) {
@@ -411,46 +404,41 @@ class _ReaderState extends State<Reader>
   }
 }
 
-abstract mixin class _ImagePerPageHandler {
-  late int _lastImagesPerPage;
-
-  late bool _lastOrientation;
-  
-  /// Track if we were on the chapter comments page before orientation change
-  bool _wasOnCommentsPage = false;
+mixin _ImagePerPageHandler on _ReaderLocation {
+  late ReaderPagePosition _position;
+  late int _positionChapter;
+  bool _isReflowing = false;
 
   bool get isPortrait;
 
-  int get page;
-
-  set page(int value);
-
   ReaderMode get mode;
 
-  String get cid;
+  bool get _shouldShowChapterCommentsAtEnd;
 
-  ComicType get type;
-  
-  /// Whether the current page is the chapter comments page
-  bool get isOnChapterCommentsPage;
-  
-  /// Get the max page (excluding comments page)
-  int get maxPage;
-  
-  /// Get images list for calculating maxPage
   List<String>? get images;
 
+  ReaderPageLayout get _pageLayout => ReaderPageLayout(
+    imagesPerPage: imagesPerPage,
+    singleFirstPage: showSingleImageOnFirstPage(),
+  );
+
   void initImagesPerPage(int initialPage) {
-    _lastImagesPerPage = imagesPerPage;
-    _lastOrientation = isPortrait;
-    _wasOnCommentsPage = false;
-    if (imagesPerPage != 1) {
-      if (showSingleImageOnFirstPage()) {
-        page = ((initialPage - 1) / imagesPerPage).ceil() + 1;
-      } else {
-        page = (initialPage / imagesPerPage).ceil();
-      }
+    _position = ReaderPagePosition(image: initialPage, layout: _pageLayout);
+    _positionChapter = chapter;
+    page = _position.page;
+  }
+
+  void _recordPageChange() {
+    if (_isReflowing) return;
+    if (_positionChapter != chapter) {
+      _position = ReaderPagePosition(image: 1, layout: _pageLayout);
+      _positionChapter = chapter;
     }
+    _position.selectPage(
+      page,
+      imageCount: images?.length,
+      hasComments: _shouldShowChapterCommentsAtEnd,
+    );
   }
 
   bool showSingleImageOnFirstPage() => appdata.settings.getReaderSetting(
@@ -459,90 +447,35 @@ abstract mixin class _ImagePerPageHandler {
     'showSingleImageOnFirstPage',
   );
 
-  /// The number of images displayed on one screen
+  /// The number of images displayed on one screen.
   int get imagesPerPage {
     if (mode.isContinuous) return 1;
-    if (isPortrait) {
-      return appdata.settings.getReaderSetting(
-            cid,
-            type.sourceKey,
-            'readerScreenPicNumberForPortrait',
-          ) ??
-          1;
-    } else {
-      return appdata.settings.getReaderSetting(
-            cid,
-            type.sourceKey,
-            'readerScreenPicNumberForLandscape',
-          ) ??
-          1;
-    }
-  }
-  
-  /// Calculate maxPage with a specific imagesPerPage value
-  int _calcMaxPage(int imagesPerPageValue) {
-    if (images == null) return 1;
-    return !showSingleImageOnFirstPage()
-        ? (images!.length / imagesPerPageValue).ceil()
-        : 1 + ((images!.length - 1) / imagesPerPageValue).ceil();
+    return appdata.settings.getReaderSetting(
+          cid,
+          type.sourceKey,
+          isPortrait
+              ? 'readerScreenPicNumberForPortrait'
+              : 'readerScreenPicNumberForLandscape',
+        ) ??
+        1;
   }
 
-  /// Check if the number of images per page has changed
   void _checkImagesPerPageChange() {
-    int currentImagesPerPage = imagesPerPage;
-    bool currentOrientation = isPortrait;
-
-    if (_lastImagesPerPage != currentImagesPerPage ||
-        _lastOrientation != currentOrientation) {
-      // Calculate old maxPage using old imagesPerPage to correctly determine
-      // if we were on the comments page before the orientation change
-      int oldMaxPage = _calcMaxPage(_lastImagesPerPage);
-      _wasOnCommentsPage = page > oldMaxPage;
-      
-      _adjustPageForImagesPerPageChange(
-        _lastImagesPerPage,
-        currentImagesPerPage,
+    final layout = _pageLayout;
+    if (layout == _position.layout &&
+        !(_position.isOnComments && !_shouldShowChapterCommentsAtEnd)) {
+      return;
+    }
+    _cancelPageAnimation();
+    _isReflowing = true;
+    try {
+      page = _position.reflow(
+        layout,
+        imageCount: images?.length,
+        hasComments: _shouldShowChapterCommentsAtEnd,
       );
-      _lastImagesPerPage = currentImagesPerPage;
-      _lastOrientation = currentOrientation;
-    }
-  }
-
-  /// Adjust the page number when the number of images per page changes
-  void _adjustPageForImagesPerPageChange(
-    int oldImagesPerPage,
-    int newImagesPerPage,
-  ) {
-    int previousImageIndex = 1;
-    if (!showSingleImageOnFirstPage() || oldImagesPerPage == 1) {
-      previousImageIndex = (page - 1) * oldImagesPerPage + 1;
-    } else {
-      if (page == 1) {
-        previousImageIndex = 1;
-      } else {
-        previousImageIndex = (page - 2) * oldImagesPerPage + 2;
-      }
-    }
-
-    int newPage;
-    if (newImagesPerPage != 1) {
-      if (showSingleImageOnFirstPage()) {
-        newPage = ((previousImageIndex - 1) / newImagesPerPage).ceil() + 1;
-      } else {
-        newPage = (previousImageIndex / newImagesPerPage).ceil();
-      }
-    } else {
-      newPage = previousImageIndex;
-    }
-
-    // Clamp to valid range (1 to maxPage)
-    newPage = newPage.clamp(1, maxPage);
-    
-    // If we were on the comments page, stay on the comments page
-    if (_wasOnCommentsPage) {
-      page = maxPage + 1;
-    } else {
-      page = newPage;
+    } finally {
+      _isReflowing = false;
     }
   }
 }
@@ -650,6 +583,13 @@ abstract mixin class _ReaderLocation {
   }
 
   int _animationCount = 0;
+  int _animationGeneration = 0;
+
+  void _cancelPageAnimation() {
+    _animationGeneration++;
+    _animationCount = 0;
+    _pendingPage = null;
+  }
 
   bool toPage(int page) {
     if (_validatePage(page)) {
@@ -658,10 +598,12 @@ abstract mixin class _ReaderLocation {
       }
       final hasAnimation = enablePageAnimation(cid, type);
       if (hasAnimation) {
+        final generation = _animationGeneration;
         _pendingPage = page;
         _animationCount++;
         update();
         _imageViewController!.animateToPage(page).then((_) {
+          if (generation != _animationGeneration) return;
           _animationCount--;
           if (_pendingPage == page) {
             _pendingPage = null;
