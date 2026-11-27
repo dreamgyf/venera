@@ -27,7 +27,25 @@ if (flutterVersionName == null) {
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
-keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream ->
+        keystoreProperties.load(stream)
+    }
+}
+
+def requiredSigningProperties = ["storeFile", "storePassword", "keyAlias", "keyPassword"]
+def missingSigningProperties = requiredSigningProperties.findAll {
+    !keystoreProperties.getProperty(it)?.trim()
+}
+if (!keystoreProperties.isEmpty() && !missingSigningProperties.isEmpty()) {
+    throw new GradleException("Incomplete android/key.properties; missing: ${missingSigningProperties.join(', ')}")
+}
+def hasReleaseSigning = missingSigningProperties.isEmpty()
+def releaseKeystoreFile = hasReleaseSigning ? file(keystoreProperties.getProperty("storeFile")) : null
+if (hasReleaseSigning && !releaseKeystoreFile.isFile()) {
+    throw new GradleException("The keystore configured in android/key.properties does not exist or is not a file.")
+}
+def releaseSigningSuffix = hasReleaseSigning ? "" : "-unsigned"
 
 android {
     namespace = "com.github.wgh136.venera"
@@ -58,17 +76,19 @@ android {
     }
 
     signingConfigs {
-        debug {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-        }
-        release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
+        if (hasReleaseSigning) {
+            debug {
+                storeFile releaseKeystoreFile
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+            release {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile releaseKeystoreFile
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
 
@@ -89,13 +109,15 @@ android {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
             }
-            signingConfig signingConfigs.release
+            signingConfig = hasReleaseSigning ? signingConfigs.release : null
         }
         debug {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
             }
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 
@@ -104,13 +126,13 @@ android {
             def abi = output.getFilter(com.android.build.OutputFile.ABI)
             if (variant.buildType.name == "release") {
                 if (abi != null) {
-                    outputFileName = "venera-${variant.versionName}-${abi}.apk"
+                    outputFileName = "venera-${variant.versionName}-${abi}${releaseSigningSuffix}.apk"
                     def abiVersionCode = project.ext.abiCodes.get(abi)
                     if (abiVersionCode != null) {
                         versionCodeOverride = variant.versionCode * 10 + abiVersionCode
                     }
                 } else {
-                    outputFileName = "venera-${variant.versionName}.apk"
+                    outputFileName = "venera-${variant.versionName}${releaseSigningSuffix}.apk"
                     versionCodeOverride = variant.versionCode * 10
                 }
             } else if (variant.buildType.name == "debug") {
