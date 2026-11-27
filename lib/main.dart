@@ -3,6 +3,7 @@ import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flex_seed_scheme/flex_seed_scheme.dart';
 import 'package:flutter/material.dart';
+import 'package:venera/components/display_regions.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:venera/foundation/log.dart';
@@ -278,10 +279,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                 ),
               );
             }
-            return _SystemUiProvider(Material(
-              color: App.isLinux ? Colors.transparent : null,
-              child: widget,
-            ));
+            return DisplayRegions(
+              child: _SystemUiProvider(Material(
+                color: App.isLinux ? Colors.transparent : null,
+                child: widget,
+              )),
+            );
           }
           throw ('widget is null');
         },

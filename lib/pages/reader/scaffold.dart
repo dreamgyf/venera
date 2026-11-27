@@ -141,8 +141,10 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
           buildStatusInfo(),
         AnimatedPositioned(
           duration: const Duration(milliseconds: 180),
-          right: 16,
-          bottom: showFloatingButtonValue == 0 ? -58 : 36,
+          right: 16 + context.padding.right,
+          bottom: showFloatingButtonValue == 0
+              ? -58
+              : 36 + context.padding.bottom,
           child: buildEpChangeButton(),
         ),
         AnimatedPositioned(
@@ -612,8 +614,8 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
         : pageText;
 
     return Positioned(
-      bottom: 13,
-      left: 25,
+      bottom: 13 + context.padding.bottom,
+      left: 25 + context.padding.left,
       child: Stack(
         children: [
           Text(
@@ -635,8 +637,8 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   Widget buildStatusInfo() {
     if (appdata.settings['enableClockAndBatteryInfoInReader']) {
       return Positioned(
-        bottom: 13,
-        right: 25,
+        bottom: 13 + context.padding.bottom,
+        right: 25 + context.padding.right,
         child: Row(
           children: [
             _ClockWidget(),
@@ -782,12 +784,11 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   }
 
   Widget buildEpChangeButton() {
-    final extraWidth = context.padding.left + context.padding.right;
     if (context.reader.widget.chapters == null) return const SizedBox();
     switch (showFloatingButtonValue) {
       case 0:
         return Container(
-          width: 58 + extraWidth,
+          width: 58,
           height: 58,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
@@ -805,7 +806,7 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
       case -1:
       case 1:
         return SizedBox(
-          width: 58 + extraWidth,
+          width: 58,
           height: 58,
           child: Material(
             color: Theme.of(context).colorScheme.primaryContainer,
