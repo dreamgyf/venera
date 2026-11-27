@@ -33,10 +33,12 @@ def main():
             check=True,
         )
 
+    # A partial rebuild must retain warnings for packages already on the release.
+    published_names = existing | set(names)
     notes = []
-    if any(path.name.endswith("-unsigned.apk") for path in files):
+    if any(name.endswith("-unsigned.apk") for name in published_names):
         notes.append("* Android `*-unsigned.apk` files are unsigned and require signing before installation.")
-    if any(path.name.endswith("-adhoc.dmg") for path in files):
+    if any(name.endswith("-adhoc.dmg") for name in published_names):
         notes.append("* macOS `*-adhoc.dmg` uses ad hoc signing, without a Developer ID certificate or notarization.")
     if not notes:
         return

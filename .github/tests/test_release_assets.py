@@ -76,6 +76,35 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.assertIn("without a Developer ID", edits[0])
         self.assertIn("/actions/runs/123", edits[0])
 
+    def test_macos_only_rebuild_retains_existing_unsigned_android_warning(self):
+        Path("outputs/venera-adhoc.dmg").write_bytes(b"package")
+        body = (
+            "Original release notes\n\n"
+            "<!-- platform-build-notes:start -->\n"
+            "* Android packages require signing before installation.\n"
+            "<!-- platform-build-notes:end -->\n"
+            "Existing release footer"
+        )
+        edits = []
+
+        def capture(command, **kwargs):
+            if command[:3] == ["gh", "release", "edit"]:
+                edits.append(Path(command[-1]).read_text())
+
+        with patch.object(publisher.subprocess, "check_output", return_value=self.metadata(
+                ["venera-unsigned.apk"], body)), \
+                patch.object(publisher.subprocess, "run", side_effect=capture) as run:
+            publisher.main()
+
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(len(edits), 1)
+        self.assertTrue(edits[0].startswith("Original release notes"))
+        self.assertTrue(edits[0].endswith("Existing release footer"))
+        self.assertEqual(edits[0].count("<!-- platform-build-notes:start -->"), 1)
+        self.assertIn("Android `*-unsigned.apk`", edits[0])
+        self.assertIn("require signing before installation", edits[0])
+        self.assertIn("macOS `*-adhoc.dmg`", edits[0])
+
 
 if __name__ == "__main__":
     unittest.main()
