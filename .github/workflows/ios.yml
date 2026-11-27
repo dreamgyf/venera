@@ -2,6 +2,8 @@ name: Validate iOS
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
   pull_request:
     paths:
       - 'ios/**'
@@ -45,3 +47,39 @@ jobs:
       - run: flutter test
       - name: Build unsigned iOS app
         run: flutter build ios --release --no-codesign
+      - name: Package release IPA
+        if: github.event_name == 'release'
+        run: |
+          APP_VERSION=$(awk '/^version:/ { print $2; exit }' pubspec.yaml)
+          test -n "$APP_VERSION"
+          PACKAGE_DIR=$(mktemp -d "$RUNNER_TEMP/venera-ios.XXXXXX")
+          mkdir -p "$PACKAGE_DIR/Payload" build/ios/release
+          cp -R build/ios/iphoneos/Runner.app "$PACKAGE_DIR/Payload/"
+          cd "$PACKAGE_DIR"
+          zip -qry "$GITHUB_WORKSPACE/build/ios/release/venera-ios-$APP_VERSION.ipa" Payload
+      - name: Save release IPA
+        if: github.event_name == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release
+          path: build/ios/release/*.ipa
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-release:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-release
+          path: release
+      - name: Attach IPA to published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" release/*.ipa --repo "$REPOSITORY"
